@@ -1,0 +1,36 @@
+{
+  "name": "google-classroom-analytics-backend",
+  "version": "1.0.0",
+  "description": "Backend for Google Classroom Analytics",
+  "main": "src/server.js",
+  "type": "module",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "nodemon src/server.js",
+    "lint": "eslint src"
+  },
+  "keywords": [
+    "google-classroom",
+    "analytics",
+    "backend",
+    "node",
+    "express"
+  ],
+  "author": "Antigravity",
+  "license": "ISC",
+  "dependencies": {
+    "colors": "^1.4.0",
+    "cors": "^2.8.5",
+    "dotenv": "^16.3.1",
+    "express": "^4.18.2",
+    "googleapis": "^128.0.0",
+    "helmet": "^7.1.0",
+    "jsonwebtoken": "^9.0.2",
+    "mongoose": "^8.0.0",
+    "morgan": "^1.10.0",
+    "node-cron": "^3.0.3"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.1"
+  }
+}
