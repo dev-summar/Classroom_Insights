@@ -9,12 +9,18 @@ const AtRiskStudents = () => {
     const [explanation, setExplanation] = useState('');
     const [explainingId, setExplainingId] = useState(null);
     const [openDialog, setOpenDialog] = useState(false);
+    const [page, setPage] = useState(1);
+    const [pagination, setPagination] = useState({ totalItems: 0, totalPages: 1 });
+    const limit = 25;
 
     useEffect(() => {
         const fetchAtRisk = async () => {
+            setLoading(true);
             try {
-                const res = await axios.get('/api/at-risk');
-                setStudents(res.data);
+                const res = await axios.get(`/api/at-risk?page=${page}&limit=${limit}`);
+                const data = res.data.items || [];
+                setStudents(data);
+                setPagination(res.data.pagination || { page, limit, totalItems: data.length, totalPages: 1 });
                 setLoading(false);
             } catch (err) {
                 console.error('Error fetching at-risk students', err);
@@ -22,7 +28,7 @@ const AtRiskStudents = () => {
             }
         };
         fetchAtRisk();
-    }, []);
+    }, [page]);
 
     const handleExplain = async (student) => {
         setExplainingId(student.studentId);
@@ -57,11 +63,11 @@ const AtRiskStudents = () => {
                         <TableRow>
                             <TableCell sx={{ fontWeight: 700 }}>Student</TableCell>
                             <TableCell sx={{ fontWeight: 700 }}>Course</TableCell>
+                            <TableCell align="center" sx={{ fontWeight: 700 }}>Status</TableCell>
                             <TableCell align="center" sx={{ fontWeight: 700 }}>Missed</TableCell>
                             <TableCell align="center" sx={{ fontWeight: 700 }}>Rate</TableCell>
                             <TableCell align="center" sx={{ fontWeight: 700 }}>Inactivity</TableCell>
-                            <TableCell sx={{ fontWeight: 700 }}>Primary Reason</TableCell>
-                            <TableCell align="center" sx={{ fontWeight: 700 }}>Details</TableCell>
+                            <TableCell sx={{ fontWeight: 700 }}>Details</TableCell>
                         </TableRow>
                     </TableHead>
                     <TableBody>
@@ -78,6 +84,19 @@ const AtRiskStudents = () => {
                                     <TableCell>{student.courseName}</TableCell>
                                     <TableCell align="center">
                                         <Chip
+                                            label={student.status || 'AT_RISK'}
+                                            size="small"
+                                            sx={{
+                                                bgcolor: '#fee2e2',
+                                                color: '#991b1b',
+                                                fontWeight: 700,
+                                                fontSize: '0.7rem',
+                                                px: 1
+                                            }}
+                                        />
+                                    </TableCell>
+                                    <TableCell align="center">
+                                        <Chip
                                             label={student.missedAssignments}
                                             size="small"
                                             color={student.missedAssignments >= 3 ? "error" : "warning"}
@@ -92,22 +111,9 @@ const AtRiskStudents = () => {
                                         </Box>
                                     </TableCell>
                                     <TableCell align="center">
-                                        <Typography variant="body2" color="text.secondary">
-                                            {student.daysSinceLastActivity === null ? 'Never' : `${student.daysSinceLastActivity} days`}
+                                        <Typography variant="body2" sx={{ fontWeight: 600, color: 'text.secondary' }}>
+                                            {student.daysSinceLastActivity === null ? 'Never' : `${student.daysSinceLastActivity}d`}
                                         </Typography>
-                                    </TableCell>
-                                    <TableCell>
-                                        <Stack direction="row" spacing={1} sx={{ flexWrap: 'wrap', gap: 1 }}>
-                                            {student.riskReasons.map((reason, rIdx) => (
-                                                <Chip
-                                                    key={rIdx}
-                                                    label={reason}
-                                                    size="small"
-                                                    variant="outlined"
-                                                    sx={{ fontSize: '0.65rem', fontWeight: 600, height: 20 }}
-                                                />
-                                            ))}
-                                        </Stack>
                                     </TableCell>
                                     <TableCell align="center">
                                         <Tooltip title="View academic explanation">
@@ -121,6 +127,37 @@ const AtRiskStudents = () => {
                         )}
                     </TableBody>
                 </Table>
+                {/* Pagination Controls */}
+                <Box sx={{ p: 2, display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderTop: '1px solid', borderColor: 'divider' }}>
+                    <Typography variant="caption" color="text.secondary">
+                        Showing {students.length} of {pagination.totalItems} students
+                    </Typography>
+                    <Box sx={{ display: 'flex', gap: 1 }}>
+                        <Button
+                            variant="outlined"
+                            size="small"
+                            disabled={page === 1}
+                            onClick={() => setPage(page - 1)}
+                            sx={{ borderRadius: 2 }}
+                        >
+                            Previous
+                        </Button>
+                        <Box sx={{ display: 'flex', alignItems: 'center', px: 2 }}>
+                            <Typography variant="body2" sx={{ fontWeight: 700 }}>
+                                Page {page} of {pagination.totalPages}
+                            </Typography>
+                        </Box>
+                        <Button
+                            variant="outlined"
+                            size="small"
+                            disabled={page >= pagination.totalPages}
+                            onClick={() => setPage(page + 1)}
+                            sx={{ borderRadius: 2 }}
+                        >
+                            Next
+                        </Button>
+                    </Box>
+                </Box>
             </TableContainer>
 
             {/* Explanation Dialog */}
@@ -152,8 +189,9 @@ const AtRiskStudents = () => {
                     <History fontSize="small" /> Compliance & Logic Note
                 </Typography>
                 <Typography variant="caption" sx={{ color: '#991b1b', display: 'block' }}>
-                    Thresholds for risk identification: Missed ≥ 2 assignments, Inactivity ≥ 7 days, or Completion Rate ＜ 50%.
-                    This analysis is derived strictly from recorded classroom activity and is meant to support early intervention by faculty.
+                    Criteria for At-Risk identification: Must be in an ACTIVE course with assignments having valid due dates.
+                    Student is flagged if they have missed tasks, submitted late, or have been inactive for ≥ 30 days.
+                    Students in courses without expectations are marked NOT_APPLICABLE and hidden.
                 </Typography>
             </Box>
         </Box>

@@ -1,0 +1,19 @@
+# Node
+node_modules/
+**/node_modules/
+
+# Vite cache
+**/.vite/
+**/.vite/**
+
+# Build
+dist/
+build/
+
+# Logs
+npm-debug.log*
+yarn-debug.log*
+
+# OS
+.DS_Store
+Thumbs.db

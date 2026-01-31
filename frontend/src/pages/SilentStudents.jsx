@@ -10,12 +10,18 @@ const SilentStudents = () => {
     const [explanation, setExplanation] = useState('');
     const [explainingId, setExplainingId] = useState(null);
     const [openDialog, setOpenDialog] = useState(false);
+    const [page, setPage] = useState(1);
+    const [pagination, setPagination] = useState({ totalItems: 0, totalPages: 1 });
+    const limit = 25;
 
     useEffect(() => {
         const fetchSilent = async () => {
+            setLoading(true);
             try {
-                const res = await axios.get('/api/silent-students');
-                setStudents(res.data);
+                const res = await axios.get(`/api/silent-students?page=${page}&limit=${limit}`);
+                const data = res.data.items || [];
+                setStudents(data);
+                setPagination(res.data.pagination || { page, limit, totalItems: data.length, totalPages: 1 });
                 setLoading(false);
             } catch (err) {
                 console.error('Error fetching silent students', err);
@@ -23,7 +29,7 @@ const SilentStudents = () => {
             }
         };
         fetchSilent();
-    }, []);
+    }, [page]);
 
     const handleExplain = async (student) => {
         setExplainingId(student.studentId);
@@ -191,30 +197,44 @@ const SilentStudents = () => {
                         <TableRow>
                             <TableCell sx={{ fontWeight: 700 }}>Student</TableCell>
                             <TableCell sx={{ fontWeight: 700 }}>Course</TableCell>
+                            <TableCell align="center" sx={{ fontWeight: 700 }}>Status</TableCell>
                             <TableCell align="center" sx={{ fontWeight: 700 }}>Days Inactive</TableCell>
                             <TableCell align="center" sx={{ fontWeight: 700 }}>Assignments Missed</TableCell>
                             <TableCell align="center" sx={{ fontWeight: 700 }}>Last Activity</TableCell>
-                            <TableCell align="center" sx={{ fontWeight: 700 }}>Inactivity Reason</TableCell>
+                            <TableCell align="center" sx={{ fontWeight: 700 }}>Analysis</TableCell>
                         </TableRow>
                     </TableHead>
                     <TableBody>
                         {students.length === 0 ? (
                             <TableRow>
-                                <TableCell colSpan={6} align="center" sx={{ py: 6 }}>
+                                <TableCell colSpan={7} align="center" sx={{ py: 6 }}>
                                     No silent students identified at current thresholds.
                                 </TableCell>
                             </TableRow>
                         ) : (
-                            students.sort((a, b) => (b.daysSinceLastActivity || 999) - (a.daysSinceLastActivity || 999)).map((student, idx) => (
+                            students.map((student, idx) => (
                                 <TableRow key={`${student.studentId}-${idx}`} hover>
                                     <TableCell sx={{ fontWeight: 600 }}>{student.studentName}</TableCell>
                                     <TableCell>{student.courseName}</TableCell>
+                                    <TableCell align="center">
+                                        <Chip
+                                            label={student.status || 'SILENT'}
+                                            size="small"
+                                            sx={{
+                                                bgcolor: '#fef3c7',
+                                                color: '#92400e',
+                                                fontWeight: 700,
+                                                fontSize: '0.7rem',
+                                                px: 1
+                                            }}
+                                        />
+                                    </TableCell>
                                     <TableCell align="center">
                                         <Typography variant="body2" sx={{
                                             fontWeight: 700,
                                             color: student.daysSinceLastActivity >= 14 ? 'error.main' : student.daysSinceLastActivity >= 7 ? 'warning.main' : 'text.primary'
                                         }}>
-                                            {student.daysSinceLastActivity === null ? 'Never Submitting' : `${student.daysSinceLastActivity} days`}
+                                            {student.daysSinceLastActivity === null ? '∞' : `${student.daysSinceLastActivity}d`}
                                         </Typography>
                                     </TableCell>
                                     <TableCell align="center">
@@ -240,6 +260,37 @@ const SilentStudents = () => {
                         )}
                     </TableBody>
                 </Table>
+                {/* Pagination Controls */}
+                <Box sx={{ p: 2, display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderTop: '1px solid', borderColor: 'divider' }}>
+                    <Typography variant="caption" color="text.secondary">
+                        Showing {students.length} of {pagination.totalItems} students
+                    </Typography>
+                    <Box sx={{ display: 'flex', gap: 1 }}>
+                        <Button
+                            variant="outlined"
+                            size="small"
+                            disabled={page === 1}
+                            onClick={() => setPage(page - 1)}
+                            sx={{ borderRadius: 2 }}
+                        >
+                            Previous
+                        </Button>
+                        <Box sx={{ display: 'flex', alignItems: 'center', px: 2 }}>
+                            <Typography variant="body2" sx={{ fontWeight: 700 }}>
+                                Page {page} of {pagination.totalPages}
+                            </Typography>
+                        </Box>
+                        <Button
+                            variant="outlined"
+                            size="small"
+                            disabled={page >= pagination.totalPages}
+                            onClick={() => setPage(page + 1)}
+                            sx={{ borderRadius: 2 }}
+                        >
+                            Next
+                        </Button>
+                    </Box>
+                </Box>
             </TableContainer>
 
             {/* Explanation Dialog */}
@@ -269,8 +320,9 @@ const SilentStudents = () => {
                     <History fontSize="small" /> Definitions & Compliance
                 </Typography>
                 <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
-                    A "Silent Student" is defined by zero turned-in assignments or crossing the 14-day inactivity threshold.
-                    This view provides purely descriptive visualizations of recorded data to support IQAC student progression goals.
+                    Criteria for "Silent Student": Must be in an ACTIVE course with existing assignments.
+                    Student is flagged if their last submission was ≥ 15 days ago (or never, if assignments exist).
+                    Students in courses without assignments are marked NOT_APPLICABLE.
                 </Typography>
             </Box>
         </Box>

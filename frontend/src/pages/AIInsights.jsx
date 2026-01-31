@@ -62,7 +62,7 @@ const AIInsights = () => {
         <Box sx={{ maxWidth: 1000, mx: 'auto', mt: 1, p: 2 }}>
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mb: 3 }}>
                 <Sparkles sx={{ color: 'secondary.main', fontSize: 32 }} />
-                <Box>
+                <Box sx={{ flexGrow: 1 }}>
                     <Typography variant="h5" sx={{ fontWeight: 800, color: 'primary.main', letterSpacing: '-0.01em' }}>
                         AI Insights
                     </Typography>
@@ -70,6 +70,19 @@ const AIInsights = () => {
                         Analytical Assistant for MIET Academic Data
                     </Typography>
                 </Box>
+                <Chip
+                    label="Insights based on synced ACTIVE data only"
+                    variant="outlined"
+                    icon={<span>🟢</span>}
+                    sx={{
+                        bgcolor: '#f0fdf4',
+                        color: '#166534',
+                        fontWeight: 700,
+                        fontSize: '0.7rem',
+                        borderColor: '#bbf7d0',
+                        '& .MuiChip-icon': { fontSize: '0.8rem' }
+                    }}
+                />
             </Box>
 
             <Paper elevation={0} sx={{

@@ -11,10 +11,11 @@ const Sidebar = () => {
     const menuItems = [
         { text: 'Dashboard', icon: <Dashboard />, path: '/dashboard' },
         { text: 'Courses', icon: <Class />, path: '/courses' },
+        { text: 'Students', icon: <School />, path: '/students' },
         { text: 'Assignments', icon: <Assignment />, path: '/assignments' },
         { text: 'Submissions', icon: <Send />, path: '/submissions' },
         { text: 'AI Insights', icon: <Sparkles />, path: '/ai-insights' },
-        { text: 'At-Risk Students', icon: <Warning />, path: '/at-risk' },
+        { text: 'At-Risk Students', icon: <Warning />, path: '/at-risk-students' },
         { text: 'Silent Students', icon: <PersonOff />, path: '/silent-students' },
     ];
 

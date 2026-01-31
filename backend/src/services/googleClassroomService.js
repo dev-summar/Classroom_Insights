@@ -8,17 +8,17 @@ dotenv.config();
  * Gets a Classroom API client strictly via Service Account + Domain-Wide Delegation.
  * THIS IS THE ONLY ALLOWED PATH FOR CLASSROOM API ACCESS.
  */
-const getClassroomClient = () => {
+const getClassroomClient = (impersonatedEmail = null) => {
     try {
-        const auth = getServiceAccountAuth();
+        const auth = getServiceAccountAuth(impersonatedEmail);
 
         // Validation: Ensure it's a JWT client
         if (auth.constructor.name !== 'JWT') {
             throw new Error(`Invalid Auth Client: Expected JWT, got ${auth.constructor.name}`);
         }
 
-        const impersonatedUser = process.env.GOOGLE_IMPERSONATED_USER;
-        console.log(`[AUTH] Initializing Google Classroom API client (JWT: ${impersonatedUser})`);
+        const subject = impersonatedEmail || process.env.GOOGLE_IMPERSONATED_USER;
+        console.log(`[AUTH] Initializing Google Classroom API client (JWT: ${subject})`);
 
         return google.classroom({ version: 'v1', auth });
     } catch (error) {

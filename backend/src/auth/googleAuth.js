@@ -13,7 +13,6 @@ const createOAuth2Client = () => {
 
 /**
  * LOGIN_SCOPES: Only for user identity. 
- * NO CLASSROOM SCOPES ALLOWED HERE.
  */
 const LOGIN_SCOPES = [
     'https://www.googleapis.com/auth/userinfo.profile',
@@ -21,28 +20,25 @@ const LOGIN_SCOPES = [
 ];
 
 /**
- * CLASSROOM_SCOPES: Absolute minimal scope set for Service Account.
- * 
- * CRITICAL: Start with minimal scopes to fix unauthorized_client error.
- * Additional scopes can be added incrementally after verification.
- * 
- * Current Minimal Set (Phase 1):
- * - classroom.courses.readonly → List and view courses
- * - classroom.rosters.readonly → View teachers and students
- * 
- * To Add After Verification (Phase 2):
- * - classroom.coursework.students.readonly → View assignments
- * - classroom.student-submissions.students.readonly → View submissions
+ * CORE_SCOPES: Always enabled and approved in Admin Console.
  */
-const CLASSROOM_SCOPES = [
+const CORE_SCOPES = [
     'https://www.googleapis.com/auth/classroom.courses.readonly',
     'https://www.googleapis.com/auth/classroom.rosters.readonly'
+];
+
+/**
+ * OPTIONAL_SCOPES: Only requested if ENABLE_ASSIGNMENTS_SYNC is true.
+ */
+const OPTIONAL_SCOPES = [
+    'https://www.googleapis.com/auth/classroom.coursework.students.readonly',
+    'https://www.googleapis.com/auth/classroom.student-submissions.students.readonly'
 ];
 
 export const getGoogleAuthURL = () => {
     const oauth2Client = createOAuth2Client();
     return oauth2Client.generateAuthUrl({
-        access_type: 'online', // No offline access needed as we don't store refresh tokens
+        access_type: 'online',
         include_granted_scopes: false,
         scope: LOGIN_SCOPES,
     });
@@ -59,41 +55,42 @@ export const getGoogleUser = async (code) => {
     });
 
     const { data } = await oauth2.userinfo.get();
-
     return { user: data, tokens };
 };
 
 /**
  * Creates a JWT client for Service Account with Domain-Wide Delegation.
- * Verified and audited for Subject impersonation.
+ * Dynamically selects scopes based on feature flags to avoid unauthorized_client errors.
  */
-export const getServiceAccountAuth = () => {
+export const getServiceAccountAuth = (impersonatedEmail = null) => {
     let privateKey = process.env.GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY;
 
     if (privateKey) {
-        // Strip extra quotes if they exist
         privateKey = privateKey.replace(/^['"]|['"]$/g, '');
-        // Normalize: Replace escaped newlines (\\n) with real newlines (\n) and trim
         privateKey = privateKey.replace(/\\n/g, '\n').trim();
-
-        // Validation: Must be a valid PEM private key
         if (!privateKey.startsWith('-----BEGIN PRIVATE KEY-----')) {
-            throw new Error('Invalid Private Key: Key must start with -----BEGIN PRIVATE KEY-----');
+            throw new Error('Invalid Private Key');
         }
     }
 
     const clientEmail = process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL;
-    const impersonatedUser = process.env.GOOGLE_IMPERSONATED_USER;
+    const impersonatedUser = impersonatedEmail || process.env.GOOGLE_IMPERSONATED_USER;
 
     if (!privateKey || !clientEmail || !impersonatedUser) {
         throw new Error('Service Account configuration is missing in .env');
     }
 
+    // FEATURE FLAG: Only include optional scopes if explicitly enabled
+    const enableAssignments = process.env.ENABLE_ASSIGNMENTS_SYNC === 'true';
+    const activeScopes = enableAssignments ? [...CORE_SCOPES, ...OPTIONAL_SCOPES] : CORE_SCOPES;
+
+    console.log(`[AUTH] Creating JWT client for ${impersonatedUser}. Scopes: ${activeScopes.length} (${enableAssignments ? 'All' : 'Core Only'})`);
+
     return new google.auth.JWT(
         clientEmail,
         null,
         privateKey,
-        CLASSROOM_SCOPES,
+        activeScopes,
         impersonatedUser
     );
 };

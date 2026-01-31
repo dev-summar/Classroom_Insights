@@ -36,10 +36,16 @@ const userSchema = new mongoose.Schema({
     lastLogin: {
         type: Date,
         default: Date.now
-    }
+    },
+    // Denormalized fields for fast sidebar reads
+    totalCourses: { type: Number, default: 0 }
 }, {
     timestamps: true
 });
+
+// CRITICAL INDEXES
+userSchema.index({ role: 1 });
+
 
 const User = mongoose.model('User', userSchema);
 export default User;

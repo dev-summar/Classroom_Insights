@@ -1,12 +1,82 @@
+
 import Course from '../models/Course.js';
 import Assignment from '../models/Assignment.js';
 import Submission from '../models/Submission.js';
 import User from '../models/User.js';
+import Teacher from '../models/Teacher.js';
+
+import { ACTIVE_COURSE_FILTER } from '../utils/courseFilters.js';
+import { getUniqueActiveCourseIds } from '../utils/dashboardMetrics.js';
+
+/**
+ * API Controller - Institutional View.
+ * All queries use the shared ACTIVE_COURSE_FILTER to ensure consistency with the Dashboard.
+ * Sync-user filtering is removed to present a unified institute-wide footprint.
+ */
 
 export const getCourses = async (req, res) => {
     try {
-        const courses = await Course.find({});
-        res.json(courses);
+        const page = Math.max(1, parseInt(req.query.page) || 1);
+        const limit = Math.max(1, parseInt(req.query.limit) || 20);
+        const skip = (page - 1) * limit;
+
+        console.log(`[API] Fetching active courses page ${page} with limit ${limit}...`);
+
+        const pipeline = [
+            { $match: ACTIVE_COURSE_FILTER },
+            {
+                $lookup: {
+                    from: 'assignments',
+                    localField: 'id',
+                    foreignField: 'courseId',
+                    as: 'assignmentDocs'
+                }
+            },
+            {
+                $addFields: {
+                    teachersCount: { $size: { $ifNull: [{ $setUnion: ["$teachers", []] }, []] } },
+                    studentsCount: { $size: { $ifNull: [{ $setUnion: ["$students", []] }, []] } },
+                    assignmentsCount: { $size: "$assignmentDocs" }
+                }
+            },
+            {
+                $facet: {
+                    metadata: [{ $count: "totalItems" }],
+                    data: [
+                        { $sort: { name: 1 } },
+                        { $skip: skip },
+                        { $limit: limit },
+                        {
+                            $project: {
+                                _id: 0,
+                                courseId: "$id",
+                                name: 1,
+                                section: 1,
+                                teachersCount: 1,
+                                studentsCount: 1,
+                                assignmentsCount: 1
+                            }
+                        }
+                    ]
+                }
+            }
+        ];
+
+        const results = await Course.aggregate(pipeline);
+
+        const metadata = results[0].metadata[0] || { totalItems: 0 };
+        const items = results[0].data;
+
+        res.json({
+            items,
+            pagination: {
+                page,
+                limit,
+                totalItems: metadata.totalItems,
+                totalPages: Math.ceil(metadata.totalItems / limit)
+            }
+        });
+
     } catch (error) {
         console.error('Error in getCourses:', error);
         res.status(500).json({ message: 'Error fetching courses' });
@@ -16,15 +86,35 @@ export const getCourses = async (req, res) => {
 // Get single course details with expanded teacher and student info
 export const getCourseById = async (req, res) => {
     try {
-        const course = await Course.findOne({ id: req.params.id });
+        const course = await Course.findOne({
+            id: req.params.id,
+            ...ACTIVE_COURSE_FILTER
+        });
 
         if (!course) {
-            return res.status(404).json({ message: 'Course not found' });
+            const archivedCourse = await Course.findOne({ id: req.params.id });
+            if (archivedCourse) {
+                return res.status(403).json({
+                    message: 'Access Denied: This course is archived.',
+                    courseState: archivedCourse.courseState
+                });
+            }
+            return res.status(404).json({ message: 'Course not found or archived' });
         }
 
-        const teachers = await User.find({
-            googleId: { $in: course.teachers || [] }
-        }).select('name email picture googleId');
+        const teachersData = await Teacher.find({ courseId: req.params.id });
+        const teacherIds = teachersData.map(t => t.userId);
+        const users = await User.find({ googleId: { $in: teacherIds } });
+
+        const teachers = teachersData.map(td => {
+            const user = users.find(u => u.googleId === td.userId);
+            return {
+                googleId: td.userId,
+                name: td.fullName,
+                email: td.emailAddress,
+                picture: user?.picture
+            };
+        });
 
         const students = await User.find({
             googleId: { $in: course.students || [] }
@@ -33,6 +123,7 @@ export const getCourseById = async (req, res) => {
         res.json({
             course,
             teachers,
+            teacherCount: teachers.length,
             students
         });
     } catch (error) {
@@ -41,75 +132,134 @@ export const getCourseById = async (req, res) => {
     }
 };
 
-// Get students for a specific course
+export const getCourseTeachers = async (req, res) => {
+    try {
+        const course = await Course.findOne({ id: req.params.id, ...ACTIVE_COURSE_FILTER });
+        if (!course) return res.status(404).json({ message: 'Course not found or inactive' });
+
+        const teachers = await Teacher.find({ courseId: req.params.id });
+        res.json(teachers);
+    } catch (error) {
+        res.status(500).json({ message: 'Error fetching teachers' });
+    }
+};
+
 export const getCourseStudents = async (req, res) => {
     try {
-        const course = await Course.findOne({ id: req.params.id }).populate('students', 'name email picture');
-        if (!course) {
-            return res.status(404).json({ message: 'Course not found' });
-        }
-        // Permission check? 
-        // If user is not teacher/admin/owner, maybe block access to roster?
-        // Assuming middleware handles basic role. but specifically for this course?
-        // For MVP, allow if in course.
+        const course = await Course.findOne({ id: req.params.id, ...ACTIVE_COURSE_FILTER });
+        if (!course) return res.status(404).json({ message: 'Course not found or inactive' });
 
-        res.json(course.students);
+        const students = await User.find({ googleId: { $in: course.students } }).select('name email picture');
+        res.json(students);
     } catch (error) {
         res.status(500).json({ message: 'Error fetching students' });
     }
 };
 
-// Get assignments (optional filter by courseId)
-// Get assignments (optional filter by courseId)
 export const getAssignments = async (req, res) => {
     try {
-        const { courseId } = req.query;
-        let query = {};
+        const page = Math.max(1, parseInt(req.query.page) || 1);
+        const limit = Math.max(1, parseInt(req.query.limit) || 20);
+        const skip = (page - 1) * limit;
 
-        if (courseId) {
-            query.courseId = courseId;
-        }
+        console.log(`[API] Fetching assignments page ${page} with limit ${limit}...`);
 
-        const assignments = await Assignment.find(query).sort({ creationTime: -1 });
-        res.json(assignments);
+        const pipeline = [
+            // 1. Join with Course to filter ACTIVE courses and get course name
+            {
+                $lookup: {
+                    from: 'courses',
+                    localField: 'courseId',
+                    foreignField: 'id',
+                    as: 'course'
+                }
+            },
+            { $unwind: "$course" },
+            { $match: { "course.courseState": "ACTIVE" } },
+            // 2. Join with Submissions to count ONLY persisted submissions
+            {
+                $lookup: {
+                    from: 'submissions',
+                    let: { googleCourseWorkId: "$id" },
+                    pipeline: [
+                        { $match: { $expr: { $eq: ["$courseWorkId", "$$googleCourseWorkId"] } } }
+                    ],
+                    as: 'submissions'
+                }
+            },
+            {
+                $addFields: {
+                    submissionsCount: { $size: "$submissions" }
+                }
+            },
+            {
+                $facet: {
+                    metadata: [{ $count: "totalItems" }],
+                    data: [
+                        { $sort: { creationTime: -1 } },
+                        { $skip: skip },
+                        { $limit: limit },
+                        {
+                            $project: {
+                                _id: 0,
+                                assignmentId: "$id",
+                                title: 1,
+                                courseId: 1,
+                                courseName: "$course.name",
+                                dueDate: 1,
+                                submissionsCount: 1
+                            }
+                        }
+                    ]
+                }
+            }
+        ];
+
+        const results = await Assignment.aggregate(pipeline);
+
+        const metadata = results[0].metadata[0] || { totalItems: 0 };
+        const items = results[0].data;
+
+        res.json({
+            items,
+            pagination: {
+                page,
+                limit,
+                totalItems: metadata.totalItems,
+                totalPages: Math.ceil(metadata.totalItems / limit)
+            }
+        });
+
     } catch (error) {
         console.error('Error in getAssignments:', error);
         res.status(500).json({ message: 'Error fetching assignments' });
     }
 };
 
-// Get submissions (optional filter by assignmentId / studentUserId)
 const getSubmissionStatus = (state, dueDate, dueTime) => {
-    if (["TURNED_IN", "RETURNED"].includes(state)) {
-        return "Turned In";
-    }
-
-    if (!dueDate || !dueDate.year) {
-        return "Assigned";
-    }
-
+    if (["TURNED_IN", "RETURNED"].includes(state)) return "Turned In";
+    if (!dueDate || !dueDate.year) return "Assigned";
     const now = new Date();
     const hours = dueTime?.hours ?? 23;
     const minutes = dueTime?.minutes ?? 59;
-
-    // Classroom months are 1-indexed, JS Date.UTC months are 0-indexed
-    const dueUTC = Date.UTC(
-        dueDate.year,
-        dueDate.month - 1,
-        dueDate.day,
-        hours,
-        minutes,
-        59
-    );
-
-    // Treat non-terminal states (null, CREATED, NEW, RECLAIMED_BY_STUDENT) as pending
+    const dueUTC = Date.UTC(dueDate.year, dueDate.month - 1, dueDate.day, hours, minutes, 59);
     return now.getTime() < dueUTC ? "Assigned" : "Missing";
 };
 
 export const getSubmissions = async (req, res) => {
     try {
-        const { assignmentId, studentId } = req.query;
+        const { assignmentId, studentId, courseId } = req.query;
+
         let query = {};
+
+        if (courseId) {
+            const course = await Course.findOne({ id: courseId, ...ACTIVE_COURSE_FILTER });
+            if (!course) return res.json([]);
+            query.courseId = courseId;
+        } else {
+            const activeCourses = await Course.find(ACTIVE_COURSE_FILTER).select('id');
+            query.courseId = { $in: activeCourses.map(c => c.id) };
+        }
 
         if (assignmentId) query.courseWorkId = assignmentId;
         if (studentId) query.studentUserId = studentId;
@@ -142,14 +292,13 @@ export const getSubmissions = async (req, res) => {
 export const getCourseSilentStudents = async (req, res) => {
     try {
         const { id } = req.params;
-        const course = await Course.findOne({ id });
-        if (!course) return res.status(404).json({ message: 'Course not found' });
+        const course = await Course.findOne({ id, ...ACTIVE_COURSE_FILTER });
+        if (!course) return res.status(404).json({ message: 'Course not found or inactive' });
 
         const studentGoogleIds = course.students || [];
         const assignments = await Assignment.find({ courseId: id });
         const submissions = await Submission.find({ courseId: id });
 
-        // Criteria: Has there been at least one assignment where the due date/time has passed?
         const now = new Date();
         const hasPassedAssignments = assignments.some(a => {
             if (!a.dueDate || !a.dueDate.year) return false;
@@ -164,22 +313,14 @@ export const getCourseSilentStudents = async (req, res) => {
             const studentSubs = submissions.filter(s => s.studentUserId === gid);
 
             let missingCount = 0;
-            let assignedCount = 0;
             let turnedInCount = 0;
 
             assignments.forEach(a => {
                 const sub = studentSubs.find(s => s.courseWorkId === a.id);
-                // If no record, it's 'CREATED' in Classroom terms but null here to trigger 'Assigned'/'Missing' check
-                const state = sub ? sub.state : null;
-                const status = getSubmissionStatus(state, a.dueDate, a.dueTime);
-
+                const status = getSubmissionStatus(sub ? sub.state : null, a.dueDate, a.dueTime);
                 if (status === 'Turned In') turnedInCount++;
                 else if (status === 'Missing') missingCount++;
-                else assignedCount++;
             });
-
-            // Silent rule: zero turnedIn AND at least one missing AND course has passed assignments
-            const isSilent = assignments.length > 0 && hasPassedAssignments && turnedInCount === 0 && missingCount > 0;
 
             return {
                 studentId: gid,
@@ -187,15 +328,82 @@ export const getCourseSilentStudents = async (req, res) => {
                 email: student?.email || 'N/A',
                 picture: student?.picture,
                 missingCount,
-                assignedCount,
                 turnedInCount,
-                silent: isSilent
+                silent: assignments.length > 0 && hasPassedAssignments && turnedInCount === 0 && missingCount > 0
             };
         }));
 
         res.json(report);
     } catch (error) {
-        console.error('Error in getCourseSilentStudents:', error);
         res.status(500).json({ message: 'Error generating report' });
+    }
+};
+
+export const getStudents = async (req, res) => {
+    try {
+        const page = Math.max(1, parseInt(req.query.page) || 1);
+        const limit = Math.max(1, parseInt(req.query.limit) || 20);
+        const skip = (page - 1) * limit;
+
+        console.log(`[API] Fetching students page ${page} with limit ${limit}...`);
+
+        const pipeline = [
+            { $match: ACTIVE_COURSE_FILTER },
+            { $unwind: "$students" },
+            {
+                $group: {
+                    _id: "$students",
+                    enrolledCoursesCount: { $sum: 1 }
+                }
+            },
+            {
+                $lookup: {
+                    from: 'users',
+                    localField: '_id',
+                    foreignField: 'googleId',
+                    as: 'user'
+                }
+            },
+            { $unwind: { path: "$user", preserveNullAndEmptyArrays: true } },
+            {
+                $project: {
+                    _id: 0,
+                    userId: "$_id",
+                    name: { $ifNull: ["$user.name", "Unknown"] },
+                    email: { $ifNull: ["$user.email", "Unknown"] },
+                    academicStatus: { $ifNull: ["$user.academicStatus", "ACTIVE"] },
+                    enrolledCoursesCount: 1
+                }
+            },
+            {
+                $facet: {
+                    metadata: [{ $count: "totalItems" }],
+                    data: [
+                        { $sort: { name: 1 } },
+                        { $skip: skip },
+                        { $limit: limit }
+                    ]
+                }
+            }
+        ];
+
+        const results = await Course.aggregate(pipeline);
+
+        const metadata = results[0].metadata[0] || { totalItems: 0 };
+        const items = results[0].data;
+
+        res.json({
+            items,
+            pagination: {
+                page,
+                limit,
+                totalItems: metadata.totalItems,
+                totalPages: Math.ceil(metadata.totalItems / limit)
+            }
+        });
+
+    } catch (error) {
+        console.error('Error in getStudents:', error);
+        res.status(500).json({ message: 'Error fetching students' });
     }
 };
